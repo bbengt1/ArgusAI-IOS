@@ -11,22 +11,31 @@ import Foundation
 struct Camera: Codable, Identifiable, Equatable {
     let id: UUID
     let name: String
-    let isEnabled: Bool
-    let isOnline: Bool
-    let sourceType: String
-    let lastEventAt: Date?
+    let type: String?
+    let isEnabled: Bool?
+    let sourceType: String?
+    let isDoorbell: Bool?
+    let createdAt: Date?
+    let updatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
         case name
+        case type
         case isEnabled = "is_enabled"
-        case isOnline = "is_online"
         case sourceType = "source_type"
-        case lastEventAt = "last_event_at"
+        case isDoorbell = "is_doorbell"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
     }
-}
 
-// MARK: - Camera List Response
-struct CameraListResponse: Codable {
-    let cameras: [Camera]
+    // Convenience computed properties with defaults
+    var enabled: Bool { isEnabled ?? true }
+    var online: Bool { true } // Server doesn't provide online status, assume online
+    var doorbell: Bool { isDoorbell ?? false }
+
+    // Display the source type or fall back to type
+    var displayType: String {
+        sourceType ?? type ?? "Unknown"
+    }
 }

@@ -17,6 +17,7 @@ struct EventSummary: Codable, Identifiable, Equatable {
     let smartDetectionType: SmartDetectionType?
     let confidence: Int?
     let hasThumbnail: Bool?
+    let thumbnailPath: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -27,12 +28,7 @@ struct EventSummary: Codable, Identifiable, Equatable {
         case smartDetectionType = "smart_detection_type"
         case confidence
         case hasThumbnail = "has_thumbnail"
-    }
-
-    var thumbnailURL: URL? {
-        guard hasThumbnail == true else { return nil }
-        // Will be constructed with base URL from APIClient
-        return nil
+        case thumbnailPath = "thumbnail_path"
     }
 }
 
@@ -52,6 +48,7 @@ struct EventDetail: Codable, Identifiable, Equatable {
     let analysisMode: AnalysisMode?
     let deliveryCarrier: String?
     let thumbnailUrl: String?
+    let thumbnailPath: String?
     let createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
@@ -69,6 +66,7 @@ struct EventDetail: Codable, Identifiable, Equatable {
         case analysisMode = "analysis_mode"
         case deliveryCarrier = "delivery_carrier"
         case thumbnailUrl = "thumbnail_url"
+        case thumbnailPath = "thumbnail_path"
         case createdAt = "created_at"
     }
 }
@@ -80,6 +78,8 @@ enum SmartDetectionType: String, Codable, CaseIterable {
     case package
     case animal
     case motion
+    case manualTrigger = "manual_trigger"
+    case unknown
 
     var displayName: String {
         switch self {
@@ -88,6 +88,8 @@ enum SmartDetectionType: String, Codable, CaseIterable {
         case .package: return "Package"
         case .animal: return "Animal"
         case .motion: return "Motion"
+        case .manualTrigger: return "Manual"
+        case .unknown: return "Event"
         }
     }
 
@@ -98,7 +100,15 @@ enum SmartDetectionType: String, Codable, CaseIterable {
         case .package: return "shippingbox.fill"
         case .animal: return "pawprint.fill"
         case .motion: return "waveform"
+        case .manualTrigger: return "hand.tap.fill"
+        case .unknown: return "exclamationmark.circle"
         }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        self = SmartDetectionType(rawValue: rawValue) ?? .unknown
     }
 }
 
@@ -120,8 +130,8 @@ enum AnalysisMode: String, Codable {
 // MARK: - Event List Response
 struct EventListResponse: Codable {
     let events: [EventSummary]
-    let totalCount: Int
-    let hasMore: Bool
+    let totalCount: Int?
+    let hasMore: Bool?
     let nextOffset: Int?
 
     enum CodingKeys: String, CodingKey {

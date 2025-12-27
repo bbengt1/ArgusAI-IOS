@@ -31,14 +31,15 @@ final class EventDetailViewModel {
     }
 
     @MainActor
-    func loadThumbnail(id: UUID, authService: AuthService) async {
+    func loadThumbnail(authService: AuthService) async {
         guard thumbnailData == nil else { return }
+        guard let thumbnailPath = event?.thumbnailPath else { return }
 
         isLoadingThumbnail = true
 
         do {
             let client = APIClient(authService: authService)
-            thumbnailData = try await client.fetchEventThumbnail(id: id)
+            thumbnailData = try await client.fetchThumbnail(path: thumbnailPath)
         } catch {
             print("Failed to load thumbnail: \(error)")
         }

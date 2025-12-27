@@ -12,32 +12,42 @@ struct PairRequest: Codable {
     let deviceId: String
     let deviceName: String
     let deviceModel: String?
+    let platform: String
 
     enum CodingKeys: String, CodingKey {
         case deviceId = "device_id"
         case deviceName = "device_name"
         case deviceModel = "device_model"
+        case platform
     }
 }
 
 // MARK: - Pairing Response
 struct PairResponse: Codable {
-    let pairingCode: String
+    let code: String
+    let expiresIn: Int
     let expiresAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case pairingCode = "pairing_code"
+        case code
+        case expiresIn = "expires_in"
         case expiresAt = "expires_at"
     }
 }
 
-// MARK: - Verify Request
-struct VerifyRequest: Codable {
-    let pairingCode: String
+// MARK: - Pairing Status Response
+struct PairingStatusResponse: Codable {
+    let confirmed: Bool
+    let expired: Bool
+}
+
+// MARK: - Exchange Request
+struct ExchangeRequest: Codable {
+    let code: String
     let deviceId: String
 
     enum CodingKeys: String, CodingKey {
-        case pairingCode = "pairing_code"
+        case code
         case deviceId = "device_id"
     }
 }
@@ -60,9 +70,11 @@ struct TokenResponse: Codable {
 // MARK: - Refresh Request
 struct RefreshRequest: Codable {
     let refreshToken: String
+    let deviceId: String
 
     enum CodingKeys: String, CodingKey {
         case refreshToken = "refresh_token"
+        case deviceId = "device_id"
     }
 }
 

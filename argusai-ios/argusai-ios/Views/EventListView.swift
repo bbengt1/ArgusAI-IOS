@@ -158,14 +158,14 @@ struct EventRowView: View {
     }
 
     private func loadThumbnail() async {
-        guard event.hasThumbnail == true, thumbnailData == nil else { return }
+        guard let thumbnailPath = event.thumbnailPath, thumbnailData == nil else { return }
 
         isLoadingThumbnail = true
         defer { isLoadingThumbnail = false }
 
         do {
             let client = APIClient(authService: authService)
-            thumbnailData = try await client.fetchEventThumbnail(id: event.id)
+            thumbnailData = try await client.fetchThumbnail(path: thumbnailPath)
         } catch {
             print("Failed to load thumbnail: \(error)")
         }

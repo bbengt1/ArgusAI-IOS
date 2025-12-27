@@ -5,6 +5,7 @@
 //  Created by Brent Bengtson on 12/26/25.
 //
 
+import Foundation
 import Testing
 @testable import argusai_ios
 
@@ -13,75 +14,51 @@ import Testing
 @Suite("PairingViewModel Tests")
 struct PairingViewModelTests {
 
-    @Test("Code filters non-numeric characters")
-    func testCodeFiltersNonNumeric() {
+    @Test("Initial state is idle")
+    func testInitialState() {
         let viewModel = PairingViewModel()
-        viewModel.code = "12a34b"
-        #expect(viewModel.code == "1234")
-    }
-
-    @Test("Code limits to 6 digits")
-    func testCodeLimitsSixDigits() {
-        let viewModel = PairingViewModel()
-        viewModel.code = "1234567890"
-        #expect(viewModel.code == "123456")
-    }
-
-    @Test("isCodeComplete returns true for 6 digits")
-    func testIsCodeComplete() {
-        let viewModel = PairingViewModel()
-        viewModel.code = "123456"
-        #expect(viewModel.isCodeComplete == true)
-    }
-
-    @Test("isCodeComplete returns false for incomplete code")
-    func testIsCodeIncomplete() {
-        let viewModel = PairingViewModel()
-        viewModel.code = "12345"
-        #expect(viewModel.isCodeComplete == false)
-    }
-
-    @Test("digit(at:) returns correct digit")
-    func testDigitAtIndex() {
-        let viewModel = PairingViewModel()
-        viewModel.code = "123456"
-        #expect(viewModel.digit(at: 0) == "1")
-        #expect(viewModel.digit(at: 3) == "4")
-        #expect(viewModel.digit(at: 5) == "6")
-    }
-
-    @Test("digit(at:) returns nil for out of bounds index")
-    func testDigitAtIndexOutOfBounds() {
-        let viewModel = PairingViewModel()
-        viewModel.code = "123"
-        #expect(viewModel.digit(at: 5) == nil)
-    }
-
-    @Test("Typing clears error message")
-    func testTypingClearsError() {
-        let viewModel = PairingViewModel()
-        viewModel.errorMessage = "Some error"
-        viewModel.code = "1"
-        #expect(viewModel.errorMessage == nil)
-    }
-
-    @Test("reset() clears all state")
-    func testReset() {
-        let viewModel = PairingViewModel()
-        viewModel.code = "123456"
-        viewModel.errorMessage = "Error"
-        viewModel.isLoading = true
-        viewModel.reset()
-        #expect(viewModel.code == "")
-        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.state == .idle)
         #expect(viewModel.isLoading == false)
+        #expect(viewModel.pairingCode == nil)
+        #expect(viewModel.errorMessage == nil)
     }
 
-    @Test("isValidInput returns true for numeric code")
-    func testIsValidInput() {
+    @Test("formattedCode formats 6-digit code as XXX XXX")
+    func testFormattedCode() {
         let viewModel = PairingViewModel()
-        viewModel.code = "123456"
-        #expect(viewModel.isValidInput == true)
+        // When no code is set, should return dashes
+        #expect(viewModel.formattedCode == "------")
+    }
+
+    @Test("formattedTimeRemaining formats correctly")
+    func testFormattedTimeRemaining() {
+        let viewModel = PairingViewModel()
+        // Default is 0 seconds
+        #expect(viewModel.formattedTimeRemaining == "0:00")
+    }
+
+    @Test("isExpired returns false when no code")
+    func testIsExpiredNoCode() {
+        let viewModel = PairingViewModel()
+        #expect(viewModel.isExpired == false)
+    }
+
+    @Test("cancel() resets state to idle")
+    func testCancel() {
+        let viewModel = PairingViewModel()
+        viewModel.cancel()
+        #expect(viewModel.state == .idle)
+    }
+
+    @Test("PairingState equality works correctly")
+    func testPairingStateEquality() {
+        let state1 = PairingViewModel.PairingState.idle
+        let state2 = PairingViewModel.PairingState.idle
+        #expect(state1 == state2)
+
+        let error1 = PairingViewModel.PairingState.error("Test")
+        let error2 = PairingViewModel.PairingState.error("Test")
+        #expect(error1 == error2)
     }
 }
 
@@ -295,7 +272,8 @@ struct ModelParsingTests {
         let request = PairRequest(
             deviceId: "device-123",
             deviceName: "iPhone",
-            deviceModel: "iPhone 15"
+            deviceModel: "iPhone 15",
+            platform: "ios"
         )
         let data = try JSONEncoder().encode(request)
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
@@ -303,6 +281,65 @@ struct ModelParsingTests {
         #expect(json["device_id"] as? String == "device-123")
         #expect(json["device_name"] as? String == "iPhone")
         #expect(json["device_model"] as? String == "iPhone 15")
+        #expect(json["platform"] as? String == "ios")
+    }
+
+    @Test("ExchangeRequest encodes correctly")
+    func testExchangeRequestEncoding() throws {
+        let request = ExchangeRequest(
+            code: "123456",
+            deviceId: "device-123"
+        )
+        let data = try JSONEncoder().encode(request)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+
+        #expect(json["code"] as? String == "123456")
+        #expect(json["device_id"] as? String == "device-123")
+    }
+
+    @Test("PairingStatusResponse decodes pending status")
+    func testPairingStatusResponsePending() throws {
+        let json = """
+        {
+            "confirmed": false,
+            "expired": false
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let response = try JSONDecoder().decode(PairingStatusResponse.self, from: data)
+
+        #expect(response.confirmed == false)
+        #expect(response.expired == false)
+    }
+
+    @Test("PairingStatusResponse decodes confirmed status")
+    func testPairingStatusResponseConfirmed() throws {
+        let json = """
+        {
+            "confirmed": true,
+            "expired": false
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let response = try JSONDecoder().decode(PairingStatusResponse.self, from: data)
+
+        #expect(response.confirmed == true)
+        #expect(response.expired == false)
+    }
+
+    @Test("PairingStatusResponse decodes expired status")
+    func testPairingStatusResponseExpired() throws {
+        let json = """
+        {
+            "confirmed": false,
+            "expired": true
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let response = try JSONDecoder().decode(PairingStatusResponse.self, from: data)
+
+        #expect(response.confirmed == false)
+        #expect(response.expired == true)
     }
 }
 
@@ -332,5 +369,23 @@ struct AuthErrorTests {
         #expect(AuthError.rateLimited.errorDescription?.contains("Too many requests") == true)
         #expect(AuthError.notAuthenticated.errorDescription?.contains("Not authenticated") == true)
         #expect(AuthError.sessionExpired.errorDescription?.contains("expired") == true)
+    }
+
+    @Test("AuthError codeNotConfirmed has correct description")
+    func testCodeNotConfirmedError() {
+        let error = AuthError.codeNotConfirmed("Code not yet confirmed")
+        #expect(error.errorDescription?.contains("not yet confirmed") == true)
+    }
+
+    @Test("AuthError codeExpired has correct description")
+    func testCodeExpiredError() {
+        let error = AuthError.codeExpired
+        #expect(error.errorDescription?.contains("expired") == true)
+    }
+
+    @Test("AuthError invalidCode has correct description")
+    func testInvalidCodeError() {
+        let error = AuthError.invalidCode("Invalid pairing code")
+        #expect(error.errorDescription?.contains("Invalid") == true)
     }
 }

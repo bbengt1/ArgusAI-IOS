@@ -10,17 +10,16 @@ import UIKit
 
 actor APIClient {
     private let authService: AuthService
-    private let session: URLSession
     private var retryCount = 0
     private let maxRetries = 3
 
+    /// URLSession that respects SSL verification settings from DiscoveryService
+    private var session: URLSession {
+        DiscoveryService.shared.urlSession
+    }
+
     init(authService: AuthService) {
         self.authService = authService
-
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 120
-        self.session = URLSession(configuration: config)
     }
 
     private var baseURL: String {
@@ -48,6 +47,20 @@ actor APIClient {
                 return date
             }
 
+            // Try without timezone (assume UTC)
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+            dateFormatter.timeZone = TimeZone(identifier: "UTC")
+            if let date = dateFormatter.date(from: dateString) {
+                return date
+            }
+
+            // Try without timezone and without fractional seconds
+            dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+            if let date = dateFormatter.date(from: dateString) {
+                return date
+            }
+
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date format: \(dateString)")
         }
         return decoder
@@ -62,7 +75,7 @@ actor APIClient {
         limit: Int = 20,
         offset: Int = 0
     ) async throws -> EventListResponse {
-        var components = URLComponents(string: "\(baseURL)/api/v1/mobile/events")!
+        var components = URLComponents(string: "\(baseURL)/api/v1/events")!
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "offset", value: String(offset))
@@ -86,38 +99,49 @@ actor APIClient {
     }
 
     func fetchRecentEvents(limit: Int = 5) async throws -> RecentEventsResponse {
-        var components = URLComponents(string: "\(baseURL)/api/v1/mobile/events/recent")!
+        var components = URLComponents(string: "\(baseURL)/api/v1/events/recent")!
         components.queryItems = [URLQueryItem(name: "limit", value: String(limit))]
 
         return try await authenticatedRequest(url: components.url!)
     }
 
     func fetchEventDetail(id: UUID) async throws -> EventDetail {
-        let url = URL(string: "\(baseURL)/api/v1/mobile/events/\(id.uuidString)")!
+        let url = URL(string: "\(baseURL)/api/v1/events/\(id.uuidString.lowercased())")!
         return try await authenticatedRequest(url: url)
     }
 
     func fetchEventThumbnail(id: UUID) async throws -> Data {
-        let url = URL(string: "\(baseURL)/api/v1/mobile/events/\(id.uuidString)/thumbnail")!
+        let url = URL(string: "\(baseURL)/api/v1/events/\(id.uuidString.lowercased())/thumbnail")!
+        return try await authenticatedImageRequest(url: url)
+    }
+
+    func fetchThumbnail(path: String) async throws -> Data {
+        // thumbnail_path may be full path like "api/v1/thumbnails/..." or relative "thumbnails/..."
+        let cleanPath = path.hasPrefix("/") ? String(path.dropFirst()) : path
+        let urlPath = cleanPath.hasPrefix("api/") ? cleanPath : "api/v1/\(cleanPath)"
+        let url = URL(string: "\(baseURL)/\(urlPath)")!
+        print("[APIClient] Fetching thumbnail: \(url.absoluteString)")
         return try await authenticatedImageRequest(url: url)
     }
 
     // MARK: - Cameras
 
     func fetchCameras() async throws -> [Camera] {
-        let url = URL(string: "\(baseURL)/api/v1/mobile/cameras")!
-        let response: CameraListResponse = try await authenticatedRequest(url: url)
-        return response.cameras
+        let url = URL(string: "\(baseURL)/api/v1/cameras")!
+        // Server returns array directly, not wrapped in {"cameras": [...]}
+        return try await authenticatedRequest(url: url)
     }
 
     func fetchCameraSnapshot(id: UUID) async throws -> Data {
-        let url = URL(string: "\(baseURL)/api/v1/mobile/cameras/\(id.uuidString)/snapshot")!
+        let url = URL(string: "\(baseURL)/api/v1/cameras/\(id.uuidString.lowercased())/snapshot")!
         return try await authenticatedImageRequest(url: url)
     }
 
     // MARK: - Private Request Methods
 
     private func authenticatedRequest<T: Decodable>(url: URL) async throws -> T {
+        print("[APIClient] Request: \(url.absoluteString)")
+
         // Refresh token if needed before request
         try await authService.refreshTokenIfNeeded()
 
@@ -137,10 +161,18 @@ actor APIClient {
                 throw APIError.invalidResponse
             }
 
+            let responseBody = String(data: data, encoding: .utf8) ?? "Unable to decode"
+            print("[APIClient] Response (\(httpResponse.statusCode)): \(responseBody.prefix(500))")
+
             switch httpResponse.statusCode {
             case 200...299:
                 retryCount = 0
-                return try decoder.decode(T.self, from: data)
+                do {
+                    return try decoder.decode(T.self, from: data)
+                } catch let decodingError {
+                    print("[APIClient] Decoding error: \(decodingError)")
+                    throw decodingError
+                }
 
             case 401:
                 // Token expired, try to refresh once
@@ -206,6 +238,27 @@ actor APIClient {
             if httpResponse.statusCode == 401 {
                 throw APIError.sessionExpired
             } else if httpResponse.statusCode == 404 {
+                throw APIError.notFound
+            }
+            throw APIError.unexpectedStatus(httpResponse.statusCode)
+        }
+
+        return data
+    }
+
+    private func unauthenticatedImageRequest(url: URL) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("image/jpeg", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            if httpResponse.statusCode == 404 {
                 throw APIError.notFound
             }
             throw APIError.unexpectedStatus(httpResponse.statusCode)

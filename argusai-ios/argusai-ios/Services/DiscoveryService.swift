@@ -12,13 +12,18 @@ import Network
 final class DiscoveryService {
     static let shared = DiscoveryService()
 
+    private static let serverHostKey = "argusai.server.host"
+    private static let serverPortKey = "argusai.server.port"
+    private static let serverUseHTTPSKey = "argusai.server.useHTTPS"
+    private static let skipSSLVerificationKey = "argusai.server.skipSSLVerification"
+
     /// The current base URL to use for API requests
-    /// Prefers local discovery, falls back to cloud relay
+    /// Prefers local discovery, falls back to configured server
     var currentBaseURL: String {
         if let local = localEndpoint, isLocalAvailable {
             return local
         }
-        return cloudRelayURL
+        return configuredServerURL ?? "https://argusai.example.com"
     }
 
     /// Whether local ArgusAI was discovered
@@ -27,13 +32,84 @@ final class DiscoveryService {
     /// The discovered local endpoint (e.g., "http://192.168.1.100:8000")
     var localEndpoint: String?
 
-    /// Cloud relay URL (configure this during setup)
-    var cloudRelayURL: String = "https://argusai.example.com"
+    /// Whether a server has been configured
+    var isServerConfigured: Bool {
+        serverHost != nil && !serverHost!.isEmpty
+    }
+
+    /// The configured server URL built from host, port, and protocol
+    var configuredServerURL: String? {
+        guard let host = serverHost, !host.isEmpty else { return nil }
+        let scheme = useHTTPS ? "https" : "http"
+        let portSuffix = serverPort != nil ? ":\(serverPort!)" : ""
+        return "\(scheme)://\(host)\(portSuffix)"
+    }
+
+    /// Server host (persisted)
+    var serverHost: String? {
+        didSet {
+            UserDefaults.standard.set(serverHost, forKey: Self.serverHostKey)
+        }
+    }
+
+    /// Server port (persisted)
+    var serverPort: Int? {
+        didSet {
+            if let port = serverPort {
+                UserDefaults.standard.set(port, forKey: Self.serverPortKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.serverPortKey)
+            }
+        }
+    }
+
+    /// Whether to use HTTPS (persisted)
+    var useHTTPS: Bool = true {
+        didSet {
+            UserDefaults.standard.set(useHTTPS, forKey: Self.serverUseHTTPSKey)
+        }
+    }
+
+    /// Whether to skip SSL certificate verification (persisted)
+    /// WARNING: Only use for development with self-signed certificates
+    var skipSSLVerification: Bool = false {
+        didSet {
+            UserDefaults.standard.set(skipSSLVerification, forKey: Self.skipSSLVerificationKey)
+            // Recreate the shared session when this changes
+            _urlSession = nil
+        }
+    }
 
     private var browser: NWBrowser?
     private var isSearching = false
 
-    private init() {}
+    /// Shared URLSession that respects SSL verification settings
+    private var _urlSession: URLSession?
+    var urlSession: URLSession {
+        if let session = _urlSession {
+            return session
+        }
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 60
+        let session: URLSession
+        if skipSSLVerification {
+            session = URLSession(configuration: config, delegate: SSLBypassDelegate.shared, delegateQueue: nil)
+        } else {
+            session = URLSession(configuration: config)
+        }
+        _urlSession = session
+        return session
+    }
+
+    private init() {
+        // Load persisted values
+        serverHost = UserDefaults.standard.string(forKey: Self.serverHostKey)
+        let storedPort = UserDefaults.standard.integer(forKey: Self.serverPortKey)
+        serverPort = storedPort > 0 ? storedPort : nil
+        useHTTPS = UserDefaults.standard.object(forKey: Self.serverUseHTTPSKey) as? Bool ?? true
+        skipSSLVerification = UserDefaults.standard.bool(forKey: Self.skipSSLVerificationKey)
+    }
 
     // MARK: - Discovery
 
@@ -165,7 +241,48 @@ final class DiscoveryService {
 
     // MARK: - Configuration
 
-    func configureCloudRelay(url: String) {
-        cloudRelayURL = url
+    func configureServer(host: String, port: Int?, useHTTPS: Bool, skipSSLVerification: Bool = false) {
+        self.serverHost = host
+        self.serverPort = port
+        self.useHTTPS = useHTTPS
+        self.skipSSLVerification = skipSSLVerification
+    }
+
+    func clearServerConfiguration() {
+        serverHost = nil
+        serverPort = nil
+        useHTTPS = true
+        skipSSLVerification = false
+        _urlSession = nil
+        UserDefaults.standard.removeObject(forKey: Self.serverHostKey)
+        UserDefaults.standard.removeObject(forKey: Self.serverPortKey)
+        UserDefaults.standard.removeObject(forKey: Self.serverUseHTTPSKey)
+        UserDefaults.standard.removeObject(forKey: Self.skipSSLVerificationKey)
+    }
+}
+
+// MARK: - SSL Bypass Delegate
+/// URLSession delegate that bypasses SSL certificate verification
+/// WARNING: Only use for development with self-signed certificates
+final class SSLBypassDelegate: NSObject, URLSessionDelegate {
+    static let shared = SSLBypassDelegate()
+
+    private override init() {
+        super.init()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        // Accept any server certificate
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+           let serverTrust = challenge.protectionSpace.serverTrust {
+            let credential = URLCredential(trust: serverTrust)
+            completionHandler(.useCredential, credential)
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
     }
 }

@@ -111,7 +111,7 @@ struct EventDetailView: View {
         }
         .padding()
         .task {
-            await viewModel.loadThumbnail(id: eventId, authService: authService)
+            await viewModel.loadThumbnail(authService: authService)
         }
     }
 

@@ -50,15 +50,19 @@ struct ArgusAIApp: App {
 // MARK: - Content View Router
 struct ContentView: View {
     @Environment(AuthService.self) private var authService
+    @Environment(DiscoveryService.self) private var discoveryService
 
     var body: some View {
         Group {
-            if authService.isAuthenticated {
+            if !discoveryService.isServerConfigured {
+                ServerConfigView()
+            } else if authService.isAuthenticated {
                 MainTabView()
             } else {
                 PairingView()
             }
         }
+        .animation(.easeInOut, value: discoveryService.isServerConfigured)
         .animation(.easeInOut, value: authService.isAuthenticated)
     }
 }
@@ -94,10 +98,39 @@ struct MainTabView: View {
 // MARK: - Settings View (Minimal)
 struct SettingsView: View {
     @Environment(AuthService.self) private var authService
+    @Environment(DiscoveryService.self) private var discoveryService
     @State private var showingLogoutConfirmation = false
+    @State private var showingServerChange = false
 
     var body: some View {
         List {
+            Section("Server") {
+                if let serverURL = discoveryService.configuredServerURL {
+                    HStack {
+                        Text("Server")
+                        Spacer()
+                        Text(serverURL)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+
+                if discoveryService.isLocalAvailable, let localEndpoint = discoveryService.localEndpoint {
+                    HStack {
+                        Image(systemName: "wifi")
+                            .foregroundStyle(.green)
+                        Text("Local: \(localEndpoint)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Button("Change Server") {
+                    showingServerChange = true
+                }
+            }
+
             Section("Account") {
                 if let deviceName = authService.deviceName {
                     HStack {
@@ -130,6 +163,15 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Are you sure you want to logout? You'll need to pair again to reconnect.")
+        }
+        .confirmationDialog("Change Server", isPresented: $showingServerChange) {
+            Button("Change Server", role: .destructive) {
+                authService.logout()
+                discoveryService.clearServerConfiguration()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Changing the server will log you out and require re-pairing.")
         }
     }
 }
@@ -187,21 +229,21 @@ struct CameraRowView: View {
     var body: some View {
         HStack {
             Circle()
-                .fill(camera.isOnline ? .green : .gray)
+                .fill(camera.online ? .green : .gray)
                 .frame(width: 10, height: 10)
 
             VStack(alignment: .leading) {
                 Text(camera.name)
                     .font(.headline)
 
-                Text(camera.sourceType.capitalized)
+                Text(camera.displayType.capitalized)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Spacer()
 
-            if !camera.isEnabled {
+            if !camera.enabled {
                 Text("Disabled")
                     .font(.caption)
                     .foregroundStyle(.orange)
